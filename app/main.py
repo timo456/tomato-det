@@ -1,27 +1,28 @@
 import os
 import time
-import tempfile
 from typing import List, Dict, Any
 
 import cv2
 import numpy as np
-from fastapi import FastAPI, UploadFile, File
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
 from ultralytics import YOLO
 
+from fastapi import FastAPI, UploadFile, File, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 
 # ========= 可改設定 =========
-# 你訓練好的 best.pt 放在 weights/ 裡
 WEIGHTS_PATH = os.path.join("weights", "best.pt")
-# 如果你還沒放 best.pt，可以先用官方預訓練:
-# WEIGHTS_PATH = "yolov8n.pt"
 
-DEFAULT_CONF = 0.1
-DEFAULT_IOU = 0.7
-MAX_DET = 300
+DEFAULT_CONF = 0.10
+DEFAULT_IOU = 0.70
+DEFAULT_MAX_DET = 300
+
+# ✅ 如果你想「不管前端送什麼，都固定用預設」就改 True
+FORCE_DEFAULT_PARAMS = True
 # ===========================
+
 
 app = FastAPI(title="Tomato Detection API (YOLOv8)")
 
@@ -35,6 +36,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ✅ 掛載靜態檔案（如果你 web/ 還有 css/js/圖片，這個很有用）
+# 這樣 /web/xxx 就能拿到 web/xxx
+if os.path.isdir("web"):
+    app.mount("/web", StaticFiles(directory="web"), name="web")
+
+
 # 載入 YOLO
 if not os.path.exists(WEIGHTS_PATH) and WEIGHTS_PATH.endswith(".pt"):
     raise FileNotFoundError(
@@ -44,9 +51,12 @@ if not os.path.exists(WEIGHTS_PATH) and WEIGHTS_PATH.endswith(".pt"):
 
 model = YOLO(WEIGHTS_PATH)
 
+
 @app.get("/", response_class=HTMLResponse)
 def home():
-    # 直接回傳前端頁面（省掉額外架 server）
+    """
+    直接回傳 web/index.html（省掉額外架 server）
+    """
     web_path = os.path.join("web", "index.html")
     if os.path.exists(web_path):
         with open(web_path, "r", encoding="utf-8") as f:
@@ -57,13 +67,26 @@ def home():
 @app.post("/detect")
 async def detect(
     file: UploadFile = File(...),
-    conf: float = DEFAULT_CONF,
-    iou: float = DEFAULT_IOU,
-    max_det: int = MAX_DET,
+
+    # ✅ 用 Query 明確指定預設值（/docs 會顯示正確）
+    conf: float = Query(DEFAULT_CONF, ge=0.0, le=1.0, description="Confidence threshold"),
+    iou: float = Query(DEFAULT_IOU, ge=0.0, le=1.0, description="IoU threshold (NMS)"),
+    max_det: int = Query(DEFAULT_MAX_DET, ge=1, le=3000, description="Max detections per image"),
 ) -> Dict[str, Any]:
     """
     收一張圖片 -> YOLOv8 推論 -> 回傳框 + 分數 + 數量 + 推論時間
     """
+
+    # 🔍 Debug：抓出到底是誰把值變成 0.25/0.5
+    print(f"[detect] received conf={conf} iou={iou} max_det={max_det}")
+
+    # ✅ 若你要固定用後端預設（忽略前端 query 參數）
+    if FORCE_DEFAULT_PARAMS:
+        conf = DEFAULT_CONF
+        iou = DEFAULT_IOU
+        max_det = DEFAULT_MAX_DET
+        print(f"[detect] FORCE_DEFAULT_PARAMS -> conf={conf} iou={iou} max_det={max_det}")
+
     # 讀上傳檔案 bytes
     img_bytes = await file.read()
     np_arr = np.frombuffer(img_bytes, np.uint8)
@@ -80,7 +103,6 @@ async def detect(
 
     # 推論
     t0 = time.time()
-    # Ultralytics YOLOv8: model(img, conf=..., iou=..., max_det=...)
     results = model.predict(
         source=img_bgr,
         conf=conf,
@@ -97,7 +119,6 @@ async def detect(
         boxes_xyxy = r.boxes.xyxy.cpu().numpy()
         scores = r.boxes.conf.cpu().numpy()
         cls_ids = r.boxes.cls.cpu().numpy().astype(int)
-
         names = r.names  # dict: cls_id -> name
 
         for (x1, y1, x2, y2), sc, cid in zip(boxes_xyxy, scores, cls_ids):
@@ -116,8 +137,11 @@ async def detect(
         "image_height": int(h),
         "count": len(detections),
         "inference_ms": float(infer_ms),
+
+        # ✅ 回傳實際用到的參數（前端顯示會準）
         "conf": float(conf),
         "iou": float(iou),
         "max_det": int(max_det),
+
         "detections": detections,
     }
