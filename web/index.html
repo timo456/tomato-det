@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Tomato Detector (YOLOv8)</title>
+  <style>
+    body { font-family: system-ui, -apple-system, "Segoe UI", Arial; margin: 24px; }
+    .row { display: flex; gap: 24px; flex-wrap: wrap; }
+    .panel { min-width: 320px; }
+    canvas { border: 1px solid #ccc; max-width: 100%; height: auto; }
+    .stat { margin: 8px 0; }
+    .hint { color: #666; font-size: 14px; }
+    button { padding: 8px 12px; cursor: pointer; }
+    input[type="number"] { width: 90px; }
+  </style>
+</head>
+<body>
+  <h2>🍅 Tomato Detector (YOLOv8)</h2>
+
+  <div class="row">
+    <div class="panel">
+      <input id="file" type="file" accept="image/*" />
+      <div class="stat">
+        conf:
+        <input id="conf" type="number" min="0" max="1" step="0.05" value="0.25" />
+        iou:
+        <input id="iou" type="number" min="0" max="1" step="0.05" value="0.50" />
+        max_det:
+        <input id="maxdet" type="number" min="1" max="2000" step="10" value="300" />
+      </div>
+      <button id="btn">Detect</button>
+      <p class="hint">上傳圖片後按 Detect。框會畫在圖上，右側顯示數量、推論時間。</p>
+
+      <div class="stat" id="info"></div>
+    </div>
+
+    <div class="panel">
+      <canvas id="cv"></canvas>
+    </div>
+  </div>
+
+  <script>
+    const fileEl = document.getElementById("file");
+    const btn = document.getElementById("btn");
+    const canvas = document.getElementById("cv");
+    const ctx = canvas.getContext("2d");
+    const info = document.getElementById("info");
+
+    function draw(img, dets) {
+      canvas.width = img.width;
+      canvas.height = img.height;
+
+      ctx.drawImage(img, 0, 0);
+
+      ctx.lineWidth = 2;
+      ctx.font = "16px Arial";
+
+      dets.forEach(d => {
+        const x = d.x1, y = d.y1, w = d.x2 - d.x1, h = d.y2 - d.y1;
+        ctx.strokeStyle = "red";
+        ctx.strokeRect(x, y, w, h);
+
+        const label = `${d.class} ${(d.score*100).toFixed(1)}%`;
+        const tx = x;
+        const ty = Math.max(18, y - 6);
+
+        ctx.fillStyle = "red";
+        ctx.fillText(label, tx, ty);
+      });
+    }
+
+    btn.onclick = async () => {
+      if (!fileEl.files || fileEl.files.length === 0) {
+        alert("請先選一張圖片");
+        return;
+      }
+
+      const conf = document.getElementById("conf").value;
+      const iou = document.getElementById("iou").value;
+      const maxdet = document.getElementById("maxdet").value;
+
+      const form = new FormData();
+      form.append("file", fileEl.files[0]);
+
+      info.innerText = "Detecting...";
+
+      const resp = await fetch(`/detect?conf=${conf}&iou=${iou}&max_det=${maxdet}`, {
+        method: "POST",
+        body: form
+      });
+
+      const data = await resp.json();
+      if (data.error) {
+        info.innerText = "Error: " + data.error;
+        return;
+      }
+
+      info.innerHTML = `
+        <div><b>count:</b> ${data.count}</div>
+        <div><b>inference:</b> ${data.inference_ms.toFixed(1)} ms</div>
+        <div><b>conf:</b> ${data.conf}  <b>iou:</b> ${data.iou}  <b>max_det:</b> ${data.max_det}</div>
+      `;
+
+      const img = new Image();
+      img.onload = () => draw(img, data.detections);
+      img.src = URL.createObjectURL(fileEl.files[0]);
+    };
+  </script>
+</body>
+</html>
