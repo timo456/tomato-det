@@ -15,11 +15,7 @@
     .grid { display:grid; grid-template-columns: 1fr; gap: 14px; }
     @media (min-width: 900px){ .grid { grid-template-columns: 360px 1fr; } }
 
-    .drop {
-      border: 2px dashed rgba(255,255,255,0.25);
-      border-radius: 16px; padding: 16px; text-align:center;
-      transition: .15s ease;
-    }
+    .drop { border: 2px dashed rgba(255,255,255,0.25); border-radius: 16px; padding: 16px; text-align:center; transition: .15s ease; }
     .drop.drag { border-color: rgba(102, 220, 255, 0.9); background: rgba(102,220,255,0.08); }
     .btn { cursor:pointer; border:0; border-radius: 12px; padding: 10px 12px; background: #2f80ff; color:white; font-weight:600; }
     .btn:disabled { opacity:.6; cursor:not-allowed; }
@@ -34,14 +30,22 @@
     .meta { display:flex; flex-wrap:wrap; gap: 10px; margin-top: 12px; }
     .muted { opacity:.75; }
     .err { color:#ffb4b4; margin-top: 10px; white-space: pre-wrap; }
+
+    .sectionTitle { margin-top: 14px; font-size: 13px; opacity: .85; letter-spacing:.2px; }
+    .box { margin-top: 8px; border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.05); border-radius: 14px; padding: 12px; }
+    .warn { margin: 6px 0 0; padding-left: 18px; opacity:.92; }
+    .warn li { margin: 4px 0; }
+    .barWrap { height: 10px; background: rgba(255,255,255,0.10); border-radius: 999px; overflow:hidden; border:1px solid rgba(255,255,255,0.10); }
+    .bar { height: 100%; width: 0%; background: rgba(102,220,255,0.95); }
+    .trendCanvas { width: 100%; height: 160px; display:block; }
   </style>
 </head>
 <body>
   <div class="wrap">
     <header>
       <div>
-        <h1>🍅 Smart Tomato Detection</h1>
-        <div class="sub">FastAPI + YOLOv8｜拖曳圖片或選擇檔案，上傳後自動框出番茄。</div>
+        <h1>🍅 Smart Tomato Monitoring</h1>
+        <div class="sub">FastAPI + YOLOv8｜偵測番茄、影像品質提醒、成熟度與採收建議、趨勢紀錄。</div>
       </div>
       <a class="pill" href="/docs" target="_blank" rel="noreferrer">Open API Docs</a>
     </header>
@@ -59,6 +63,7 @@
 
         <div class="row">
           <label>conf: <span id="confVal">0.10</span></label>
+          <span class="sub muted" title="你後端目前 FORCE_DEFAULT_PARAMS=True，所以最後會以後端回傳為準">以後端為準</span>
         </div>
         <input id="conf" type="range" min="0" max="1" step="0.01" value="0.10" />
 
@@ -79,6 +84,33 @@
         </div>
 
         <div class="err" id="err"></div>
+
+        <!-- ✅ 新增：品質與採收建議 -->
+        <div class="sectionTitle">品質提醒</div>
+        <div class="box">
+          <div class="row" style="margin-top:0;">
+            <div class="pill">quality_score: <b id="qScore">-</b></div>
+            <div class="pill muted">blur_var: <span id="blurVar">-</span></div>
+            <div class="pill muted">brightness: <span id="brightness">-</span></div>
+          </div>
+          <div class="barWrap" style="margin-top:10px;">
+            <div class="bar" id="qBar"></div>
+          </div>
+          <ul class="warn" id="warnList"></ul>
+        </div>
+
+        <div class="sectionTitle">採收建議</div>
+        <div class="box">
+          <div class="pill" style="margin-bottom:10px;">📌 <span id="harvest">-</span></div>
+          <div class="meta" id="maturityMeta"></div>
+          <div class="sub muted" style="margin-top:8px;">（以顏色比例做成熟度 proxy：ripe/turning/unripe）</div>
+        </div>
+
+        <div class="sectionTitle">最近趨勢（最近 30 筆）</div>
+        <div class="box">
+          <canvas id="trend" class="trendCanvas"></canvas>
+          <div class="sub muted" id="trendHint" style="margin-top:8px;">尚未有歷史資料</div>
+        </div>
       </div>
 
       <div class="card">
@@ -109,11 +141,31 @@
   const ctx = canvas.getContext('2d');
   const meta = document.getElementById('meta');
 
+  // 新增 UI
+  const qScore = document.getElementById('qScore');
+  const blurVar = document.getElementById('blurVar');
+  const brightness = document.getElementById('brightness');
+  const qBar = document.getElementById('qBar');
+  const warnList = document.getElementById('warnList');
+
+  const harvest = document.getElementById('harvest');
+  const maturityMeta = document.getElementById('maturityMeta');
+
+  const trend = document.getElementById('trend');
+  const trendCtx = trend.getContext('2d');
+  const trendHint = document.getElementById('trendHint');
+
   let currentFile = null;
   let img = new Image();
 
   function setErr(msg){ errEl.textContent = msg || ""; }
-  function pill(text){ const d=document.createElement('div'); d.className='pill'; d.textContent=text; return d; }
+
+  function pill(text){
+    const d=document.createElement('div');
+    d.className='pill';
+    d.textContent=text;
+    return d;
+  }
 
   function updateSliderUI(){
     confVal.textContent = Number(conf.value).toFixed(2);
@@ -127,7 +179,6 @@
 
   function drawPreview(){
     if(!img.src) return;
-    // 讓 canvas 跟原圖同尺寸，框才準
     canvas.width = img.naturalWidth;
     canvas.height = img.naturalHeight;
     ctx.drawImage(img, 0, 0);
@@ -149,7 +200,6 @@
     if(f) loadFile(f);
   };
 
-  // drag & drop
   drop.addEventListener('dragover', (e)=>{ e.preventDefault(); drop.classList.add('drag'); });
   drop.addEventListener('dragleave', ()=> drop.classList.remove('drag'));
   drop.addEventListener('drop', (e)=>{
@@ -157,6 +207,120 @@
     const f = e.dataTransfer.files?.[0];
     if(f) loadFile(f);
   });
+
+  function renderQuality(data){
+    const q = data.quality || {};
+    const score = (q.quality_score ?? null);
+    qScore.textContent = (score === null) ? "-" : Number(score).toFixed(0);
+    blurVar.textContent = (q.blur_var === undefined) ? "-" : Number(q.blur_var).toFixed(1);
+    brightness.textContent = (q.brightness === undefined) ? "-" : Number(q.brightness).toFixed(1);
+
+    const pct = (score === null) ? 0 : Math.max(0, Math.min(100, Number(score)));
+    qBar.style.width = pct + "%";
+
+    warnList.innerHTML = "";
+    const warns = q.warnings || [];
+    if(warns.length === 0){
+      const li = document.createElement('li');
+      li.textContent = "未偵測到明顯品質問題";
+      warnList.appendChild(li);
+    }else{
+      warns.forEach(w=>{
+        const li=document.createElement('li');
+        li.textContent = w;
+        warnList.appendChild(li);
+      });
+    }
+  }
+
+  function renderMaturity(data){
+    const m = data.maturity_summary || {};
+    harvest.textContent = m.harvest_suggestion || "-";
+
+    maturityMeta.innerHTML = "";
+    if(m.ripe !== undefined) maturityMeta.appendChild(pill(`ripe: ${m.ripe}`));
+    if(m.turning !== undefined) maturityMeta.appendChild(pill(`turning: ${m.turning}`));
+    if(m.unripe !== undefined) maturityMeta.appendChild(pill(`unripe: ${m.unripe}`));
+    if(m.unknown !== undefined) maturityMeta.appendChild(pill(`unknown: ${m.unknown}`));
+  }
+
+  function drawTrend(records){
+    // resize canvas (retina)
+    const cssW = trend.clientWidth;
+    const cssH = 160;
+    trend.width = Math.floor(cssW * devicePixelRatio);
+    trend.height = Math.floor(cssH * devicePixelRatio);
+    trendCtx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+
+    trendCtx.clearRect(0,0,cssW,cssH);
+
+    if(!records || records.length < 2){
+      trendHint.textContent = "歷史資料不足（至少偵測 2 次）";
+      return;
+    }
+    trendHint.textContent = "count 趨勢（越高代表畫面中番茄越多）";
+
+    const counts = records.map(r => Number(r.count ?? 0));
+    const maxV = Math.max(...counts, 1);
+    const minV = Math.min(...counts, 0);
+
+    const pad = 14;
+    const W = cssW, H = cssH;
+    const xStep = (W - pad*2) / (counts.length - 1);
+    const yMap = (v) => {
+      if(maxV === minV) return H/2;
+      const t = (v - minV) / (maxV - minV);
+      return (H - pad) - t * (H - pad*2);
+    };
+
+    // grid line
+    trendCtx.globalAlpha = 0.35;
+    trendCtx.strokeStyle = "white";
+    trendCtx.lineWidth = 1;
+    trendCtx.beginPath();
+    trendCtx.moveTo(pad, H-pad);
+    trendCtx.lineTo(W-pad, H-pad);
+    trendCtx.stroke();
+    trendCtx.globalAlpha = 1;
+
+    // line
+    trendCtx.strokeStyle = "rgba(102,220,255,0.95)";
+    trendCtx.lineWidth = 2;
+    trendCtx.beginPath();
+    counts.forEach((v,i)=>{
+      const x = pad + xStep*i;
+      const y = yMap(v);
+      if(i===0) trendCtx.moveTo(x,y);
+      else trendCtx.lineTo(x,y);
+    });
+    trendCtx.stroke();
+
+    // dots
+    trendCtx.fillStyle = "rgba(102,220,255,0.95)";
+    counts.forEach((v,i)=>{
+      const x = pad + xStep*i;
+      const y = yMap(v);
+      trendCtx.beginPath();
+      trendCtx.arc(x,y,3,0,Math.PI*2);
+      trendCtx.fill();
+    });
+
+    // labels
+    trendCtx.fillStyle = "rgba(255,255,255,0.85)";
+    trendCtx.font = "12px sans-serif";
+    trendCtx.fillText(`min ${minV}`, pad, pad);
+    trendCtx.fillText(`max ${maxV}`, pad, pad+16);
+  }
+
+  async function refreshHistory(){
+    try{
+      const res = await fetch("/history?limit=30");
+      const records = await res.json();
+      drawTrend(records);
+    }catch(e){
+      trendHint.textContent = "無法讀取 /history（部署環境可能重置檔案層）";
+    }
+  }
 
   async function runDetect(){
     setErr("");
@@ -179,13 +343,19 @@
       // 重畫原圖
       drawPreview();
 
-      // 畫框（簡單白框，你要更美我也能幫你加樣式）
+      // 畫框 + 成熟度顏色（ripe/turning/unripe）
       (data.detections || []).forEach(d => {
         ctx.lineWidth = Math.max(2, canvas.width * 0.002);
-        ctx.strokeStyle = "rgba(102,220,255,0.95)";
+
+        const m = d.maturity || "unknown";
+        if(m === "ripe") ctx.strokeStyle = "rgba(255,90,90,0.95)";
+        else if(m === "turning") ctx.strokeStyle = "rgba(255,200,90,0.95)";
+        else if(m === "unripe") ctx.strokeStyle = "rgba(120,255,160,0.95)";
+        else ctx.strokeStyle = "rgba(102,220,255,0.95)";
+
         ctx.strokeRect(d.x1, d.y1, d.x2-d.x1, d.y2-d.y1);
 
-        const label = `${d.class} ${(d.score*100).toFixed(1)}%`;
+        const label = `${d.class} ${(d.score*100).toFixed(1)}% • ${m}`;
         ctx.font = `${Math.max(14, canvas.width*0.018)}px sans-serif`;
         const tw = ctx.measureText(label).width;
         const th = Math.max(18, canvas.width*0.022);
@@ -197,8 +367,15 @@
 
       meta.appendChild(pill(`count: ${data.count}`));
       meta.appendChild(pill(`inference: ${Number(data.inference_ms).toFixed(1)} ms`));
-      meta.appendChild(pill(`conf: ${Number(data.conf).toFixed(2)}`));
-      meta.appendChild(pill(`iou: ${Number(data.iou).toFixed(2)}`));
+      meta.appendChild(pill(`conf(used): ${Number(data.conf).toFixed(2)}`));
+      meta.appendChild(pill(`iou(used): ${Number(data.iou).toFixed(2)}`));
+
+      // ✅ 新增區塊渲染
+      renderQuality(data);
+      renderMaturity(data);
+
+      // ✅ 更新趨勢
+      await refreshHistory();
 
       statusEl.textContent = "完成 ✅";
     }catch(err){
@@ -210,6 +387,9 @@
   }
 
   runBtn.onclick = runDetect;
+
+  // 進頁面先畫一次趨勢（如果有歷史）
+  refreshHistory();
 </script>
 </body>
 </html>
