@@ -2,3 +2,4 @@
 {"time": "2025-12-29T19:57:43", "count": 8, "ripe": 8, "turning": 0, "unripe": 0, "unknown": 0, "quality_score": 100.0, "conf": 0.1, "iou": 0.7, "max_det": 300, "inference_ms": 80.39331436157227}
 {"time": "2025-12-29T19:58:02", "count": 8, "ripe": 8, "turning": 0, "unripe": 0, "unknown": 0, "quality_score": 100.0, "conf": 0.1, "iou": 0.7, "max_det": 300, "inference_ms": 47.43695259094238}
 {"time": "2025-12-29T19:58:06", "count": 13, "ripe": 8, "turning": 1, "unripe": 4, "unknown": 0, "quality_score": 100.0, "conf": 0.1, "iou": 0.7, "max_det": 300, "inference_ms": 61.779022216796875}
+{"time": "2025-12-29T20:42:01", "count": 17, "ripe": 0, "turning": 0, "unripe": 17, "unknown": 0, "quality_score": 100.0, "conf": 0.1, "iou": 0.7, "max_det": 300, "inference_ms": 167.4973964691162}

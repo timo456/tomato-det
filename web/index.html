@@ -38,6 +38,21 @@
     .barWrap { height: 10px; background: rgba(255,255,255,0.10); border-radius: 999px; overflow:hidden; border:1px solid rgba(255,255,255,0.10); }
     .bar { height: 100%; width: 0%; background: rgba(102,220,255,0.95); }
     .trendCanvas { width: 100%; height: 160px; display:block; }
+    /* ✅ 只影響「品質提醒」那一排：允許換行，避免超出 */
+    .qualityRow{
+      flex-wrap: wrap;
+      justify-content: flex-start;  /* 不要 space-between，會把元素硬撐開 */
+      gap: 8px;                      /* 用 gap 來排版更穩 */
+    }
+
+    /* ✅ pill 在窄螢幕時可以縮，不會把容器撐爆 */
+    .qualityRow .pill{
+      max-width: 100%;
+      box-sizing: border-box;
+      white-space: nowrap;          /* 一般情況不換行 */
+      overflow: hidden;
+      text-overflow: ellipsis;      /* 太長就 … */
+    }
   </style>
 </head>
 <body>
@@ -88,7 +103,7 @@
         <!-- ✅ 新增：品質與採收建議 -->
         <div class="sectionTitle">品質提醒</div>
         <div class="box">
-          <div class="row" style="margin-top:0;">
+          <div class="row qualityRow" style="margin-top:0;">
             <div class="pill">quality_score: <b id="qScore">-</b></div>
             <div class="pill muted">blur_var: <span id="blurVar">-</span></div>
             <div class="pill muted">brightness: <span id="brightness">-</span></div>
